@@ -1,4 +1,4 @@
-"""Tests automatises de l'API Task Manager."""
+"""Tests automatisés de l'API Task Manager."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +8,7 @@ import main
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    """Lance l'API sur une base SQLite temporaire, vide a chaque test."""
+    """Base SQLite temporaire, vide à chaque test."""
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
     with TestClient(main.app) as test_client:
         yield test_client

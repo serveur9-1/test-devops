@@ -18,11 +18,11 @@ env/
 .coverage
 htmlcov/
 
-# Bases de donnees SQLite locales
+# Bases de données SQLite locales
 *.db
 *.sqlite3
 
-# Editeurs / OS
+# Éditeurs / OS
 .vscode/
 .idea/
 .DS_Store
