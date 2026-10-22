@@ -1,0 +1,25 @@
+# Contexte de build du service frontend (racine du projet).
+.git
+.gitignore
+.github
+
+# L'image Nginx n'a besoin de rien du backend.
+backend
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Bases SQLite locales et secrets
+*.db
+*.sqlite3
+.env
+.env.*
+
+# Divers
+*.md
+Dockerfile
+docker-compose.yml

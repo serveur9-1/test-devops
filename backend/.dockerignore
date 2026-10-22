@@ -1,0 +1,19 @@
+# Contexte de build du service backend (./backend).
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Bases SQLite locales : en production la base vit dans le volume /data.
+*.db
+*.sqlite3
+
+# Secrets
+.env
+.env.*
+
+# Inutile à l'exécution de l'API
+test_main.py
+Dockerfile
+.dockerignore

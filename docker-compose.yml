@@ -1,0 +1,53 @@
+services:
+  backend:
+    build: ./backend
+    image: task-manager-backend:latest
+    container_name: task-manager-backend
+    environment:
+      DATABASE_PATH: /data/tasks.db
+    volumes:
+      # Volume nommé : les tâches survivent à un `docker compose down`.
+      - tasks-data:/data
+    # Non publié : le backend n'est joignable que depuis le réseau Compose.
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      # python est déjà dans l'image, inutile d'y ajouter curl.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: task-manager-frontend:latest
+    container_name: task-manager-frontend
+    ports:
+      # Seul point d'entrée public de l'application.
+      - "80:80"
+    depends_on:
+      backend:
+        # Nginx résout le nom "backend" au chargement de sa configuration :
+        # s'il n'est pas encore là, Nginx refuse de démarrer.
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # wget est fourni par busybox dans nginx:alpine.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  tasks-data:
