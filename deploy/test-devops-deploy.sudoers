@@ -1,0 +1,9 @@
+# À installer dans /etc/sudoers.d/test-devops-deploy (root:root, mode 0440).
+# Validation obligatoire avant activation : visudo -c -f <fichier>
+#
+# gha-runner ne reçoit aucun privilège administrateur général : il peut
+# uniquement lancer ce script précis, détenu par root et non modifiable par
+# lui. Le script valide son unique argument (un SHA Git).
+# gha-runner n'est volontairement PAS membre du groupe docker, car ce groupe
+# équivaut à un accès root sur la machine.
+gha-runner ALL=(root) NOPASSWD: /usr/local/sbin/test-devops-deploy
