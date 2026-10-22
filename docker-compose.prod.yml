@@ -1,0 +1,24 @@
+# Surcharge de production : utilise les images publiées sur Docker Hub au lieu
+# de construire localement. Le déploiement local (docker-compose.yml seul)
+# n'est pas affecté.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+#
+# --no-build est indispensable : une surcharge Compose ne peut pas supprimer la
+# clé build: du fichier de base, et sans cette option Compose reconstruirait
+# les images depuis des sources absentes du serveur.
+
+# Nom de projet figé. Par défaut Compose le déduit du nom du dossier, et le
+# volume s'appelle « <projet>_tasks-data » : un dossier renommé pointerait donc
+# vers un volume vide. À vérifier avec « docker volume ls » sur le serveur.
+name: test-devops
+
+services:
+  backend:
+    image: serveur91225/test-devops-backend:${IMAGE_TAG:-latest}
+    pull_policy: always
+
+  frontend:
+    image: serveur91225/test-devops-frontend:${IMAGE_TAG:-latest}
+    pull_policy: always
