@@ -1,0 +1,139 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Permissions minimales : le workflow ne fait que lire le dépôt.
+permissions:
+  contents: read
+
+# Évite deux déploiements concurrents sur le même serveur.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests backend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Même version que backend/Dockerfile, pour tester ce qui part en prod.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Lancer pytest
+        working-directory: backend
+        run: python -m pytest -v
+
+  build:
+    name: Image ${{ matrix.name }}
+    needs: test
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            image: serveur91225/test-devops-backend
+          # Contexte = racine du dépôt : l'image Nginx copie frontend/ et nginx/.
+          - name: frontend
+            context: .
+            dockerfile: ./frontend/Dockerfile
+            image: serveur91225/test-devops-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Sur une Pull Request on construit sans publier : pas de connexion au
+      # registre, donc aucun secret manipulé.
+      - name: Connexion à Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Construire et publier
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # Publication réservée à main : un workflow_dispatch lancé depuis une
+          # autre branche construit sans écraser le tag latest.
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    name: Déploiement EC2
+    needs: build
+    runs-on: ubuntu-24.04
+    # Désactivé par défaut. Ce job ne s'exécute que si la variable de dépôt
+    # DEPLOY_ENABLED vaut "true", c'est-à-dire une fois l'accès SSH des
+    # runners GitHub correctement sécurisé. Tant qu'elle est absente, le job
+    # est ignoré sans faire échouer la pipeline.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      vars.DEPLOY_ENABLED == 'true'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      # Les secrets passent par des variables d'environnement, jamais par une
+      # interpolation ${{ }} dans le corps d'un script shell : cela évite
+      # l'injection de commande et toute trace dans les logs.
+      - name: Préparer la clé SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copier les fichiers Compose
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          APP_DIR: ${{ vars.EC2_APP_DIR || 'test-devops' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" "mkdir -p \"$APP_DIR\""
+          scp -i ~/.ssh/deploy_key \
+            docker-compose.yml docker-compose.prod.yml \
+            "$EC2_USER@$EC2_HOST:$APP_DIR/"
+
+      - name: Déployer et vérifier le healthcheck
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          APP_DIR: ${{ vars.EC2_APP_DIR || 'test-devops' }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" \
+            "APP_DIR='$APP_DIR' IMAGE_TAG='$IMAGE_TAG' bash -s" \
+            < deploy/remote-deploy.sh
+
+      - name: Supprimer la clé SSH
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
