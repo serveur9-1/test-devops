@@ -1,1 +1,1 @@
-﻿# Test technique DevOps
+# test-devops
