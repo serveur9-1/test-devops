@@ -1,24 +1,62 @@
-# Surcharge de production : utilise les images publiées sur Docker Hub au lieu
-# de construire localement. Le déploiement local (docker-compose.yml seul)
-# n'est pas affecté.
+# Fichier de production AUTONOME (il ne surcharge pas docker-compose.yml).
+# Il est installé par un administrateur dans /opt/test-devops/ en root:root et
+# exécuté par root : tout chemin qu'il référencerait serait une élévation de
+# privilèges. Il n'a donc volontairement ni section build:, ni montage bind,
+# ni chemin relatif, et ne lit aucun fichier du dépôt.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+#   IMAGE_TAG=<sha> docker compose -f docker-compose.prod.yml up -d
 #
-# --no-build est indispensable : une surcharge Compose ne peut pas supprimer la
-# clé build: du fichier de base, et sans cette option Compose reconstruirait
-# les images depuis des sources absentes du serveur.
+# Le déploiement local de développement reste inchangé : docker compose up
+# n'utilise que docker-compose.yml.
 
-# Nom de projet figé. Par défaut Compose le déduit du nom du dossier, et le
-# volume s'appelle « <projet>_tasks-data » : un dossier renommé pointerait donc
-# vers un volume vide. À vérifier avec « docker volume ls » sur le serveur.
+# Nom de projet figé : il détermine le préfixe des ressources Compose et doit
+# correspondre au déploiement déjà en service sur l'EC2.
 name: test-devops
 
 services:
   backend:
-    image: serveur91225/test-devops-backend:${IMAGE_TAG:-latest}
-    pull_policy: always
+    # IMAGE_TAG est obligatoire : pas de retour silencieux sur « latest », on
+    # déploie exactement l'image construite par la pipeline.
+    image: serveur91225/test-devops-backend:${IMAGE_TAG:?IMAGE_TAG est obligatoire}
+    container_name: task-manager-backend
+    environment:
+      DATABASE_PATH: /data/tasks.db
+    volumes:
+      - tasks-data:/data
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frontend:
-    image: serveur91225/test-devops-frontend:${IMAGE_TAG:-latest}
-    pull_policy: always
+    image: serveur91225/test-devops-frontend:${IMAGE_TAG:?IMAGE_TAG est obligatoire}
+    container_name: task-manager-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  tasks-data:
+    # Nom explicite : cible le volume SQLite déjà en service et reste le même
+    # quel que soit le nom de projet. Aucun « down -v » n'est exécuté.
+    name: test-devops_tasks-data

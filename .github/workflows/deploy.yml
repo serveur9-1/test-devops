@@ -86,54 +86,26 @@ jobs:
   deploy:
     name: Déploiement EC2
     needs: build
-    runs-on: ubuntu-24.04
+    # Runner auto-hébergé sur l'EC2 : plus besoin d'ouvrir le port 22 aux
+    # plages d'IP des runners GitHub, c'est le runner qui sort vers GitHub.
+    runs-on: [self-hosted, Linux, X64, ec2-deploy]
     # Désactivé par défaut. Ce job ne s'exécute que si la variable de dépôt
-    # DEPLOY_ENABLED vaut "true", c'est-à-dire une fois l'accès SSH des
-    # runners GitHub correctement sécurisé. Tant qu'elle est absente, le job
-    # est ignoré sans faire échouer la pipeline.
+    # DEPLOY_ENABLED vaut "true". Tant qu'elle est absente, le job est ignoré
+    # sans faire échouer la pipeline.
     if: >-
       github.ref == 'refs/heads/main' &&
       github.event_name != 'pull_request' &&
       vars.DEPLOY_ENABLED == 'true'
     environment: production
+    # Pas de checkout : le déploiement n'utilise aucun fichier du dépôt. Le
+    # fichier Compose de production vit dans /opt/test-devops, en root:root,
+    # hors de portée de gha-runner.
     steps:
-      - uses: actions/checkout@v4
-
-      # Les secrets passent par des variables d'environnement, jamais par une
-      # interpolation ${{ }} dans le corps d'un script shell : cela évite
-      # l'injection de commande et toute trace dans les logs.
-      - name: Préparer la clé SSH
+      - name: Déployer le tag ${{ github.sha }}
         env:
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Copier les fichiers Compose
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          APP_DIR: ${{ vars.EC2_APP_DIR || 'test-devops' }}
-        run: |
-          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" "mkdir -p \"$APP_DIR\""
-          scp -i ~/.ssh/deploy_key \
-            docker-compose.yml docker-compose.prod.yml \
-            "$EC2_USER@$EC2_HOST:$APP_DIR/"
-
-      - name: Déployer et vérifier le healthcheck
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          APP_DIR: ${{ vars.EC2_APP_DIR || 'test-devops' }}
           IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" \
-            "APP_DIR='$APP_DIR' IMAGE_TAG='$IMAGE_TAG' bash -s" \
-            < deploy/remote-deploy.sh
-
-      - name: Supprimer la clé SSH
-        if: always()
-        run: rm -f ~/.ssh/deploy_key
+        # Seule commande privilégiée autorisée par /etc/sudoers.d.
+        # -n : échoue au lieu d'attendre un mot de passe.
+        # Le tag passe par l'environnement plutôt que par une interpolation
+        # ${{ }} dans le script, et le script revalide sa valeur.
+        run: sudo -n /usr/local/sbin/test-devops-deploy "$IMAGE_TAG"
