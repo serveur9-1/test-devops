@@ -11,37 +11,48 @@ expliquée ligne à ligne.
 
 ## Architecture
 
-```
-                      Navigateur
-                          │
-                          │  http://<ec2>  (port 80, seul port public)
-                          ▼
-            ┌─────────────────────────────┐
-            │ Conteneur frontend          │  nginx:alpine
-            │                             │
-            │  /         → fichiers statiques (HTML/CSS/JS)
-            │  /api/...  → reverse proxy vers le backend
-            └──────────────┬──────────────┘
-                           │ réseau privé Docker Compose
-                           │ hôte « backend », port 8000 (non publié)
-                           ▼
-            ┌─────────────────────────────┐
-            │ Conteneur backend           │  python:3.12-slim
-            │  FastAPI + Uvicorn          │  utilisateur non-root (appuser)
-            │  écrit /data/tasks.db       │
-            └──────────────┬──────────────┘
-                           │
-                           ▼
-              ┌──────────────────────────┐
-              │ Volume test-devops_      │  persiste hors des conteneurs
-              │        tasks-data        │
-              └──────────────────────────┘
+```mermaid
+flowchart TB
+    NAV["Navigateur<br/>HTML + CSS + JavaScript natif"]
+
+    subgraph EC2["AWS EC2 — Ubuntu 24.04"]
+        subgraph NET["Réseau Docker Compose — projet test-devops"]
+            NGINX["Conteneur frontend<br/>nginx:alpine<br/>port 80 publié"]
+            API["Conteneur backend<br/>FastAPI + Uvicorn<br/>python:3.12-slim<br/>utilisateur non-root appuser<br/>port 8000 NON publié"]
+        end
+        VOL[("Volume test-devops_tasks-data<br/>monté sur /data<br/>fichier tasks.db")]
+    end
+
+    NAV -- "1. GET / — HTML, CSS, JS" --> NGINX
+    NAV -- "2. fetch /api/... — même origine, pas de CORS" --> NGINX
+    NGINX -- "3. proxy_pass vers backend:8000<br/>le préfixe /api est retiré" --> API
+    API -- "4. sqlite3, requêtes paramétrées" --> VOL
 ```
 
 Le point clé est le reverse proxy. Le navigateur ne connaît qu'une seule
 origine, donc aucune configuration CORS n'est nécessaire et le frontend ne
 contient aucune URL d'API codée en dur. Le backend n'est jamais exposé
 directement : il utilise `expose` et non `ports`.
+
+### Communications entre composants
+
+| De | Vers | Protocole / canal | Objet |
+|---|---|---|---|
+| Navigateur | Nginx | HTTP, port 80 public | Page, assets statiques et appels `/api/` |
+| Nginx | FastAPI | HTTP interne, `backend:8000` | `proxy_pass`, préfixe `/api` retiré |
+| FastAPI | SQLite | Bibliothèque `sqlite3`, fichier local | Lecture/écriture sur `/data/tasks.db` |
+| SQLite | Volume Docker | Montage du volume nommé | Persistance hors du cycle de vie des conteneurs |
+| GitHub Actions | Docker Hub | HTTPS, `docker login` + `push` | Publication des images, tags `latest` et SHA |
+| GitHub Actions | Runner EC2 | Sortie HTTPS initiée **par le runner** | Récupération des jobs, aucun port entrant ouvert |
+| Runner EC2 | Docker Hub | HTTPS, `docker compose pull` | Récupération de l'image du SHA déployé |
+| Runner EC2 | Docker (root) | `sudo` sur une commande unique | Exécution de `/usr/local/sbin/test-devops-deploy` |
+| Script de déploiement | Nginx | HTTP, `http://localhost/api/health` | Vérification après déploiement |
+
+Deux points méritent d'être soulignés. Le runner auto-hébergé **initie** la
+connexion vers GitHub : aucun port entrant n'est ouvert sur l'EC2 pour la
+CI/CD, et le port 22 peut rester fermé aux runners. Et la vérification
+post-déploiement passe obligatoirement par le port 80, puisque le backend
+n'est pas joignable depuis l'hôte.
 
 ### Technologies
 
@@ -226,6 +237,9 @@ vers `main`, les push sur `main` et manuellement via `workflow_dispatch`.
         (fin)                        │     EC2       │   auto-hébergé
                                      └───────────────┘
 ```
+
+Un échec des tests arrête la pipeline : aucune image n'est publiée et aucun
+déploiement n'a lieu.
 
 Les trois jobs sont enchaînés par `needs`, donc **un échec des tests ou du
 build empêche tout déploiement**. Les permissions du workflow sont réduites à
@@ -517,23 +531,37 @@ de centralisation des logs : le diagnostic repose sur `docker compose logs`.
 « Impossible de contacter l'API » signale que `/api` ne répond pas. Vérifiez
 la chaîne complète :
 
+En production, utilisez les commandes `docker` nommées ci-dessous plutôt que
+`docker compose`. Elles ne dépendent d'aucun fichier Compose, donc ni du
+`IMAGE_TAG` obligatoire de `docker-compose.prod.yml`, ni du fichier de
+développement présent dans `/home/ubuntu/test-devops`.
+
 ```bash
-curl -i http://localhost/api/health     # doit renvoyer 200
-docker compose ps                       # les deux conteneurs "healthy" ?
-docker compose logs frontend --tail 50
+curl -i http://localhost/api/health          # doit renvoyer 200
+docker ps                                    # les deux conteneurs "healthy" ?
+docker logs task-manager-frontend --tail 50
 ```
 
 **Nginx refuse de démarrer avec `host not found in upstream "backend"`.** Il a
 tenté de résoudre le nom avant que le backend ne soit prêt. C'est ce que
-`depends_on` avec `condition: service_healthy` doit empêcher ; relancez
-`docker compose up -d` et vérifiez que le healthcheck du backend passe.
+`depends_on` avec `condition: service_healthy` doit empêcher ; en local,
+relancez `docker compose up -d` et vérifiez que le healthcheck du backend
+passe. En production, relancez le déploiement du SHA courant plutôt qu'un
+`docker compose up` : lancé depuis `/home/ubuntu/test-devops`, il lirait le
+fichier Compose de développement et reconstruirait les images.
+
+```bash
+# SHA actuellement déployé, puis redéploiement du même SHA
+docker inspect --format '{{.Config.Image}}' task-manager-backend
+sudo /usr/local/sbin/test-devops-deploy <sha-40-hex>
+```
 
 **Le backend n'est pas `healthy`.** Souvent un problème d'écriture dans
 `/data`, le conteneur tournant en non-root :
 
 ```bash
-docker compose logs backend --tail 50
-docker compose exec backend ls -ld /data
+docker logs task-manager-backend --tail 50
+docker exec task-manager-backend ls -ld /data
 docker volume inspect test-devops_tasks-data
 ```
 
