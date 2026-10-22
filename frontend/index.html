@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Task Manager</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1>Task Manager</h1>
+
+      <form id="task-form" autocomplete="off">
+        <input
+          id="task-title"
+          type="text"
+          maxlength="200"
+          placeholder="Nouvelle tâche..."
+          aria-label="Titre de la tâche"
+          required
+        />
+        <button type="submit">Ajouter</button>
+      </form>
+
+      <p id="message" class="message" role="status" aria-live="polite"></p>
+
+      <ul id="task-list" class="task-list"></ul>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
