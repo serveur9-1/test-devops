@@ -1,0 +1,127 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f4f5f7;
+  font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  color: #1f2933;
+}
+
+.card {
+  width: 100%;
+  max-width: 480px;
+  margin: 16px;
+  padding: 24px;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  margin: 0 0 16px;
+  font-size: 1.5rem;
+}
+
+form {
+  display: flex;
+  gap: 8px;
+}
+
+input {
+  flex: 1;
+  /* Sans min-width, un flex item ne rétrécit pas sous sa taille intrinsèque. */
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #cbd2d9;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+button:disabled {
+  background: #9aa5b1;
+  cursor: not-allowed;
+}
+
+.message {
+  min-height: 1.2rem;
+  margin: 12px 0 0;
+  font-size: 0.9rem;
+  color: #c0392b;
+}
+
+.task-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.task-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #e4e7eb;
+}
+
+.task-list li:last-child {
+  border-bottom: none;
+}
+
+.task-title {
+  overflow-wrap: anywhere;
+}
+
+.delete {
+  flex-shrink: 0;
+  background: #e4e7eb;
+  color: #1f2933;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.delete:hover {
+  background: #c0392b;
+  color: #ffffff;
+}
+
+.empty {
+  display: block;
+  color: #7b8794;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 420px) {
+  .card {
+    padding: 16px;
+  }
+
+  form {
+    flex-direction: column;
+  }
+}
